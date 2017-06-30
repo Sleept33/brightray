@@ -33,17 +33,17 @@ MediaStreamDevicesController::MediaStreamDevicesController(
       // and microphone to avoid popping two infobars.
       microphone_requested_(
           request.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE ||
-          request.request_type == content::MEDIA_OPEN_DEVICE),
+          request.request_type == content::MEDIA_OPEN_DEVICE_PEPPER_ONLY),
       webcam_requested_(
           request.video_type == content::MEDIA_DEVICE_VIDEO_CAPTURE ||
-          request.request_type == content::MEDIA_OPEN_DEVICE) {
+          request.request_type == content::MEDIA_OPEN_DEVICE_PEPPER_ONLY) {
 }
 
 MediaStreamDevicesController::~MediaStreamDevicesController() {
   if (!callback_.is_null()) {
     callback_.Run(content::MediaStreamDevices(),
                   content::MEDIA_DEVICE_INVALID_STATE,
-                  scoped_ptr<content::MediaStreamUI>());
+                  std::unique_ptr<content::MediaStreamUI>());
   }
 }
 
@@ -72,8 +72,8 @@ void MediaStreamDevicesController::Accept() {
   content::MediaStreamDevices devices;
   if (microphone_requested_ || webcam_requested_) {
     switch (request_.request_type) {
-      case content::MEDIA_OPEN_DEVICE: {
-        const content::MediaStreamDevice* device = NULL;
+      case content::MEDIA_OPEN_DEVICE_PEPPER_ONLY: {
+        const content::MediaStreamDevice* device = nullptr;
         // For open device request pick the desired device or fall back to the
         // first available of the given type.
         if (request_.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE) {
@@ -137,24 +137,22 @@ void MediaStreamDevicesController::Accept() {
                               webcam_requested_,
                               &devices);
         break;
-      case content::MEDIA_ENUMERATE_DEVICES:
-        // Do nothing.
-        NOTREACHED();
-        break;
     }
   }
 
   content::MediaResponseCallback cb = callback_;
   callback_.Reset();
-  cb.Run(devices, content::MEDIA_DEVICE_OK, scoped_ptr<content::MediaStreamUI>());
+  cb.Run(devices, content::MEDIA_DEVICE_OK,
+         std::unique_ptr<content::MediaStreamUI>());
 }
 
-void MediaStreamDevicesController::Deny(content::MediaStreamRequestResult result) {
+void MediaStreamDevicesController::Deny(
+    content::MediaStreamRequestResult result) {
   content::MediaResponseCallback cb = callback_;
   callback_.Reset();
   cb.Run(content::MediaStreamDevices(),
          result,
-         scoped_ptr<content::MediaStreamUI>());
+         std::unique_ptr<content::MediaStreamUI>());
 }
 
 void MediaStreamDevicesController::HandleUserMediaRequest() {
@@ -194,7 +192,7 @@ void MediaStreamDevicesController::HandleUserMediaRequest() {
   cb.Run(devices,
          devices.empty() ? content::MEDIA_DEVICE_INVALID_STATE :
                            content::MEDIA_DEVICE_OK,
-         scoped_ptr<content::MediaStreamUI>());
+         std::unique_ptr<content::MediaStreamUI>());
 }
 
 }  // namespace brightray

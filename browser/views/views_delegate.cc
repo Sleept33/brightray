@@ -5,6 +5,7 @@
 #include "browser/views/views_delegate.h"
 
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+#include "ui/views/widget/native_widget_aura.h"
 
 #if defined(OS_LINUX)
 #include "ui/views/linux_ui/linux_ui.h"
@@ -13,13 +14,9 @@
 namespace brightray {
 
 ViewsDelegate::ViewsDelegate() {
-  DCHECK(!views::ViewsDelegate::views_delegate);
-  views::ViewsDelegate::views_delegate = this;
 }
 
 ViewsDelegate::~ViewsDelegate() {
-  DCHECK_EQ(views::ViewsDelegate::views_delegate, this);
-  views::ViewsDelegate::views_delegate = NULL;
 }
 
 void ViewsDelegate::SaveWindowPlacement(const views::Widget* window,
@@ -51,7 +48,8 @@ void ViewsDelegate::NotifyMenuItemFocused(
 #if defined(OS_WIN)
 HICON ViewsDelegate::GetDefaultWindowIcon() const {
   // Use current exe's icon as default window icon.
-  return LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(1  /* IDR_MAINFRAME */));
+  return LoadIcon(GetModuleHandle(NULL),
+                  MAKEINTRESOURCE(1  /* IDR_MAINFRAME */));
 }
 
 HICON ViewsDelegate::GetSmallWindowIcon() const {
@@ -93,16 +91,15 @@ void ViewsDelegate::OnBeforeWidgetInit(
   if (params->native_widget)
     return;
 
-  // The native_widget is required when using aura.
-  if (params->type == views::Widget::InitParams::TYPE_MENU ||
-      (params->parent == NULL && params->context == NULL && !params->child))
+  if (params->parent &&
+      params->type != views::Widget::InitParams::TYPE_MENU &&
+      params->type != views::Widget::InitParams::TYPE_TOOLTIP) {
+    params->native_widget = new views::NativeWidgetAura(delegate);
+  } else {
     params->native_widget = new views::DesktopNativeWidgetAura(delegate);
+  }
 }
 
-
-base::TimeDelta ViewsDelegate::GetDefaultTextfieldObscuredRevealDuration() {
-  return base::TimeDelta();
-}
 
 bool ViewsDelegate::WindowManagerProvidesTitleBar(bool maximized) {
 #if defined(OS_LINUX)

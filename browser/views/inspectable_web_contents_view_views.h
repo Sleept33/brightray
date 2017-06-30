@@ -10,6 +10,7 @@
 namespace views {
 class WebView;
 class Widget;
+class WidgetDelegate;
 }
 
 namespace brightray {
@@ -24,33 +25,39 @@ class InspectableWebContentsViewViews : public InspectableWebContentsView,
   ~InspectableWebContentsViewViews();
 
   // InspectableWebContentsView:
-  virtual views::View* GetView() override;
-  virtual views::View* GetWebView() override;
-  virtual void ShowDevTools() override;
-  virtual void CloseDevTools() override;
-  virtual bool IsDevToolsViewShowing() override;
-  virtual void SetIsDocked(bool docked) override;
-  virtual void SetContentsResizingStrategy(
+  views::View* GetView() override;
+  views::View* GetWebView() override;
+  void ShowDevTools() override;
+  void CloseDevTools() override;
+  bool IsDevToolsViewShowing() override;
+  bool IsDevToolsViewFocused() override;
+  void SetIsDocked(bool docked) override;
+  void SetContentsResizingStrategy(
       const DevToolsContentsResizingStrategy& strategy) override;
+  void SetTitle(const base::string16& title) override;
 
   InspectableWebContentsImpl* inspectable_web_contents() {
     return inspectable_web_contents_;
   }
 
+  const base::string16& GetTitle() const { return title_; }
+
  private:
   // views::View:
-  virtual void Layout() override;
+  void Layout() override;
 
   // Owns us.
   InspectableWebContentsImpl* inspectable_web_contents_;
 
-  scoped_ptr<views::Widget> devtools_window_;
+  std::unique_ptr<views::Widget> devtools_window_;
   views::WebView* devtools_window_web_view_;
-  views::WebView* contents_web_view_;
+  views::View* contents_web_view_;
   views::WebView* devtools_web_view_;
 
   DevToolsContentsResizingStrategy strategy_;
   bool devtools_visible_;
+  views::WidgetDelegate* devtools_window_delegate_;
+  base::string16 title_;
 
   DISALLOW_COPY_AND_ASSIGN(InspectableWebContentsViewViews);
 };

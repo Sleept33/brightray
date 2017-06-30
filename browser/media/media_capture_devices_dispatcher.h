@@ -6,7 +6,6 @@
 #define BRIGHTRAY_BROWSER_MEDIA_MEDIA_CAPTURE_DEVICES_DISPATCHER_H_
 
 #include "base/callback.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "content/public/browser/media_observer.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -51,20 +50,25 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   void DisableDeviceEnumerationForTesting();
 
   // Overridden from content::MediaObserver:
-  virtual void OnAudioCaptureDevicesChanged() override;
-  virtual void OnVideoCaptureDevicesChanged() override;
-  virtual void OnMediaRequestStateChanged(
+  void OnAudioCaptureDevicesChanged() override;
+  void OnVideoCaptureDevicesChanged() override;
+  void OnMediaRequestStateChanged(
       int render_process_id,
       int render_view_id,
       int page_request_id,
       const GURL& security_origin,
       content::MediaStreamType stream_type,
       content::MediaRequestState state) override;
-  virtual void OnCreatingAudioStream(int render_process_id,
-                                     int render_view_id) override;
+  void OnCreatingAudioStream(int render_process_id,
+                             int render_view_id) override;
+  void OnSetCapturingLinkSecured(int render_process_id,
+                                 int render_frame_id,
+                                 int page_request_id,
+                                 content::MediaStreamType stream_type,
+                                 bool is_secure) override;
 
  private:
-  friend struct DefaultSingletonTraits<MediaCaptureDevicesDispatcher>;
+  friend struct base::DefaultSingletonTraits<MediaCaptureDevicesDispatcher>;
 
   MediaCaptureDevicesDispatcher();
   virtual ~MediaCaptureDevicesDispatcher();

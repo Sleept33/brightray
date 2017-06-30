@@ -4,25 +4,42 @@
 
 #include "browser/browser_context.h"
 
+#include "browser/media/media_device_id_salt.h"
 #include "browser/brightray_paths.h"
+#include "browser/browser_client.h"
 #include "browser/inspectable_web_contents_impl.h"
 #include "browser/network_delegate.h"
 #include "browser/permission_manager.h"
+#include "browser/special_storage_policy.h"
+#include "browser/zoom_level_delegate.h"
 #include "common/application_info.h"
 
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/prefs/json_pref_store.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/pref_service_factory.h"
+
+#include "components/prefs/json_pref_store.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/pref_service_factory.h"
+
+#include "base/strings/string_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "net/base/escape.h"
 
 using content::BrowserThread;
 
 namespace brightray {
+
+namespace {
+
+// Convert string to lower case and escape it.
+std::string MakePartitionName(const std::string& input) {
+  return net::EscapePath(base::ToLowerASCII(input));
+}
+
+}  // namespace
 
 class BrowserContext::ResourceContext : public content::ResourceContext {
  public:
@@ -33,29 +50,69 @@ class BrowserContext::ResourceContext : public content::ResourceContext {
   }
 
  private:
-  virtual net::HostResolver* GetHostResolver() override {
+  net::HostResolver* GetHostResolver() override {
     return getter_->host_resolver();
   }
 
-  virtual net::URLRequestContext* GetRequestContext() override {
+  net::URLRequestContext* GetRequestContext() override {
     return getter_->GetURLRequestContext();
+  }
+
+  std::string GetMediaDeviceIDSalt() override {
+    auto media_device_id_salt_ = getter_->GetMediaDeviceIDSalt();
+    if (media_device_id_salt_)
+      return media_device_id_salt_->GetSalt();
+    return content::ResourceContext::GetMediaDeviceIDSalt();
   }
 
   URLRequestContextGetter* getter_;
 };
 
-BrowserContext::BrowserContext() : resource_context_(new ResourceContext) {
+// static
+BrowserContext::BrowserContextMap BrowserContext::browser_context_map_;
+
+// static
+scoped_refptr<BrowserContext> BrowserContext::Get(
+    const std::string& partition, bool in_memory) {
+  PartitionKey key(partition, in_memory);
+  if (browser_context_map_[key].get())
+    return make_scoped_refptr(browser_context_map_[key].get());
+
+  return nullptr;
 }
 
-void BrowserContext::Initialize() {
+BrowserContext::BrowserContext(const std::string& partition, bool in_memory)
+    : in_memory_(in_memory),
+      resource_context_(new ResourceContext),
+      storage_policy_(new SpecialStoragePolicy),
+      weak_factory_(this) {
   if (!PathService::Get(DIR_USER_DATA, &path_)) {
     PathService::Get(DIR_APP_DATA, &path_);
     path_ = path_.Append(base::FilePath::FromUTF8Unsafe(GetApplicationName()));
     PathService::Override(DIR_USER_DATA, path_);
   }
 
+  if (!in_memory_ && !partition.empty())
+    path_ = path_.Append(FILE_PATH_LITERAL("Partitions"))
+                .Append(base::FilePath::FromUTF8Unsafe(
+                    MakePartitionName(partition)));
+
+  content::BrowserContext::Initialize(this, path_);
+
+  browser_context_map_[PartitionKey(partition, in_memory)] = GetWeakPtr();
+}
+
+BrowserContext::~BrowserContext() {
+  NotifyWillBeDestroyed(this);
+  ShutdownStoragePartitions();
+  BrowserThread::DeleteSoon(BrowserThread::IO,
+                            FROM_HERE,
+                            resource_context_.release());
+}
+
+void BrowserContext::InitPrefs() {
   auto prefs_path = GetPath().Append(FILE_PATH_LITERAL("Preferences"));
-  base::PrefServiceFactory prefs_factory;
+  PrefServiceFactory prefs_factory;
   prefs_factory.SetUserPrefsFile(prefs_path,
       JsonPrefStore::GetTaskRunnerForFile(
           prefs_path, BrowserThread::GetBlockingPool()).get());
@@ -67,14 +124,15 @@ void BrowserContext::Initialize() {
   prefs_ = prefs_factory.Create(registry.get());
 }
 
-BrowserContext::~BrowserContext() {
-  BrowserThread::DeleteSoon(BrowserThread::IO,
-                            FROM_HERE,
-                            resource_context_.release());
-}
-
 void BrowserContext::RegisterInternalPrefs(PrefRegistrySimple* registry) {
   InspectableWebContentsImpl::RegisterPrefs(registry);
+  MediaDeviceIDSalt::RegisterPrefs(registry);
+  ZoomLevelDelegate::RegisterPrefs(registry);
+}
+
+URLRequestContextGetter* BrowserContext::GetRequestContext() {
+  return static_cast<URLRequestContextGetter*>(
+      GetDefaultStoragePartition(this)->GetURLRequestContext());
 }
 
 net::URLRequestContextGetter* BrowserContext::CreateRequestContext(
@@ -83,11 +141,14 @@ net::URLRequestContextGetter* BrowserContext::CreateRequestContext(
   DCHECK(!url_request_getter_.get());
   url_request_getter_ = new URLRequestContextGetter(
       this,
+      network_controller_handle(),
+      static_cast<NetLog*>(BrowserClient::Get()->GetNetLog()),
       GetPath(),
-      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::IO),
-      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::FILE),
+      in_memory_,
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
       protocol_handlers,
-      protocol_interceptors.Pass());
+      std::move(protocol_interceptors));
   resource_context_->set_url_request_context_getter(url_request_getter_.get());
   return url_request_getter_.get();
 }
@@ -96,43 +157,28 @@ net::NetworkDelegate* BrowserContext::CreateNetworkDelegate() {
   return new NetworkDelegate;
 }
 
+MediaDeviceIDSalt* BrowserContext::GetMediaDeviceIDSalt() {
+  if (IsOffTheRecord())
+    return nullptr;
+  if (!media_device_id_salt_.get())
+    media_device_id_salt_.reset(new MediaDeviceIDSalt(prefs_.get()));
+  return media_device_id_salt_.get();
+}
+
 base::FilePath BrowserContext::GetPath() const {
   return path_;
 }
 
-scoped_ptr<content::ZoomLevelDelegate> BrowserContext::CreateZoomLevelDelegate(
-    const base::FilePath& partition_path) {
-  return scoped_ptr<content::ZoomLevelDelegate>();
+std::unique_ptr<content::ZoomLevelDelegate>
+BrowserContext::CreateZoomLevelDelegate(const base::FilePath& partition_path) {
+  if (!IsOffTheRecord()) {
+    return base::MakeUnique<ZoomLevelDelegate>(prefs(), partition_path);
+  }
+  return std::unique_ptr<content::ZoomLevelDelegate>();
 }
 
 bool BrowserContext::IsOffTheRecord() const {
-  return false;
-}
-
-net::URLRequestContextGetter* BrowserContext::GetRequestContext() {
-  return GetDefaultStoragePartition(this)->GetURLRequestContext();
-}
-
-net::URLRequestContextGetter* BrowserContext::GetRequestContextForRenderProcess(
-    int renderer_child_id) {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter* BrowserContext::GetMediaRequestContext() {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
-    BrowserContext::GetMediaRequestContextForRenderProcess(
-        int renderer_child_id) {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
-    BrowserContext::GetMediaRequestContextForStoragePartition(
-        const base::FilePath& partition_path,
-        bool in_memory) {
-  return GetRequestContext();
+  return in_memory_;
 }
 
 content::ResourceContext* BrowserContext::GetResourceContext() {
@@ -148,7 +194,7 @@ content::BrowserPluginGuestManager* BrowserContext::GetGuestManager() {
 }
 
 storage::SpecialStoragePolicy* BrowserContext::GetSpecialStoragePolicy() {
-  return nullptr;
+  return storage_policy_.get();
 }
 
 content::PushMessagingService* BrowserContext::GetPushMessagingService() {
@@ -163,6 +209,32 @@ content::PermissionManager* BrowserContext::GetPermissionManager() {
   if (!permission_manager_.get())
     permission_manager_.reset(new PermissionManager);
   return permission_manager_.get();
+}
+
+content::BackgroundSyncController*
+BrowserContext::GetBackgroundSyncController() {
+  return nullptr;
+}
+
+net::URLRequestContextGetter*
+BrowserContext::CreateRequestContextForStoragePartition(
+    const base::FilePath& partition_path,
+    bool in_memory,
+    content::ProtocolHandlerMap* protocol_handlers,
+    content::URLRequestInterceptorScopedVector request_interceptors) {
+  return nullptr;
+}
+
+net::URLRequestContextGetter*
+BrowserContext::CreateMediaRequestContext() {
+  return url_request_getter_.get();
+}
+
+net::URLRequestContextGetter*
+BrowserContext::CreateMediaRequestContextForStoragePartition(
+    const base::FilePath& partition_path,
+    bool in_memory) {
+  return nullptr;
 }
 
 }  // namespace brightray

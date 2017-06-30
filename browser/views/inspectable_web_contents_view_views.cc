@@ -2,8 +2,10 @@
 
 #include "browser/inspectable_web_contents_delegate.h"
 #include "browser/inspectable_web_contents_impl.h"
+#include "browser/inspectable_web_contents_view_delegate.h"
 
 #include "base/strings/utf_string_conversions.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -22,14 +24,12 @@ class DevToolsWindowDelegate : public views::ClientView,
       : views::ClientView(widget, view),
         shell_(shell),
         view_(view),
-        widget_(widget),
-        title_(base::ASCIIToUTF16("Developer Tools")) {
+        widget_(widget) {
     // A WidgetDelegate should be deleted on DeleteDelegate.
     set_owned_by_client();
 
-    InspectableWebContentsDelegate* delegate = shell->inspectable_web_contents()->GetDelegate();
-    if (delegate)
-      icon_ = delegate->GetDevToolsWindowIcon();
+    if (shell->GetDelegate())
+      icon_ = shell->GetDelegate()->GetDevToolsWindowIcon();
   }
   virtual ~DevToolsWindowDelegate() {}
 
@@ -39,13 +39,15 @@ class DevToolsWindowDelegate : public views::ClientView,
   bool CanResize() const override { return true; }
   bool CanMaximize() const override { return true; }
   bool CanMinimize() const override { return true; }
-  base::string16 GetWindowTitle() const override { return title_; }
+  base::string16 GetWindowTitle() const override { return shell_->GetTitle(); }
   gfx::ImageSkia GetWindowAppIcon() override { return GetWindowIcon(); }
   gfx::ImageSkia GetWindowIcon() override { return icon_; }
   views::Widget* GetWidget() override { return widget_; }
   const views::Widget* GetWidget() const override { return widget_; }
   views::View* GetContentsView() override { return view_; }
-  views::ClientView* CreateClientView(views::Widget* widget) { return this; }
+  views::ClientView* CreateClientView(views::Widget* widget) override {
+    return this;
+  }
 
   // views::ClientView:
   bool CanClose() override {
@@ -57,7 +59,6 @@ class DevToolsWindowDelegate : public views::ClientView,
   InspectableWebContentsViewViews* shell_;
   views::View* view_;
   views::Widget* widget_;
-  base::string16 title_;
   gfx::ImageSkia icon_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindowDelegate);
@@ -73,21 +74,33 @@ InspectableWebContentsView* CreateInspectableContentsView(
 InspectableWebContentsViewViews::InspectableWebContentsViewViews(
     InspectableWebContentsImpl* inspectable_web_contents)
     : inspectable_web_contents_(inspectable_web_contents),
-      devtools_window_web_view_(NULL),
-      contents_web_view_(new views::WebView(NULL)),
-      devtools_web_view_(new views::WebView(NULL)),
-      devtools_visible_(false) {
+      devtools_window_web_view_(nullptr),
+      contents_web_view_(nullptr),
+      devtools_web_view_(new views::WebView(nullptr)),
+      devtools_visible_(false),
+      devtools_window_delegate_(nullptr),
+      title_(base::ASCIIToUTF16("Developer Tools")) {
   set_owned_by_client();
 
+  if (inspectable_web_contents_->GetWebContents()->GetNativeView()) {
+    views::WebView* contents_web_view = new views::WebView(nullptr);
+    contents_web_view->SetWebContents(
+        inspectable_web_contents_->GetWebContents());
+    contents_web_view_ = contents_web_view;
+  } else {
+    contents_web_view_ = new views::Label(
+        base::ASCIIToUTF16("No content under offscreen mode"));
+  }
+
   devtools_web_view_->SetVisible(false);
-  contents_web_view_->SetWebContents(inspectable_web_contents_->GetWebContents());
   AddChildView(devtools_web_view_);
   AddChildView(contents_web_view_);
 }
 
 InspectableWebContentsViewViews::~InspectableWebContentsViewViews() {
   if (devtools_window_)
-    inspectable_web_contents()->SaveDevToolsBounds(devtools_window_->GetWindowBoundsInScreen());
+    inspectable_web_contents()->SaveDevToolsBounds(
+        devtools_window_->GetWindowBoundsInScreen());
 }
 
 views::View* InspectableWebContentsViewViews::GetView() {
@@ -104,12 +117,15 @@ void InspectableWebContentsViewViews::ShowDevTools() {
 
   devtools_visible_ = true;
   if (devtools_window_) {
-    devtools_window_web_view_->SetWebContents(inspectable_web_contents_->devtools_web_contents());
-    devtools_window_->SetBounds(inspectable_web_contents()->GetDevToolsBounds());
+    devtools_window_web_view_->SetWebContents(
+        inspectable_web_contents_->GetDevToolsWebContents());
+    devtools_window_->SetBounds(
+        inspectable_web_contents()->GetDevToolsBounds());
     devtools_window_->Show();
   } else {
     devtools_web_view_->SetVisible(true);
-    devtools_web_view_->SetWebContents(inspectable_web_contents_->devtools_web_contents());
+    devtools_web_view_->SetWebContents(
+        inspectable_web_contents_->GetDevToolsWebContents());
     devtools_web_view_->RequestFocus();
     Layout();
   }
@@ -121,9 +137,11 @@ void InspectableWebContentsViewViews::CloseDevTools() {
 
   devtools_visible_ = false;
   if (devtools_window_) {
-    inspectable_web_contents()->SaveDevToolsBounds(devtools_window_->GetWindowBoundsInScreen());
+    inspectable_web_contents()->SaveDevToolsBounds(
+        devtools_window_->GetWindowBoundsInScreen());
     devtools_window_.reset();
-    devtools_window_web_view_ = NULL;
+    devtools_window_web_view_ = nullptr;
+    devtools_window_delegate_ = nullptr;
   } else {
     devtools_web_view_->SetVisible(false);
     devtools_web_view_->SetWebContents(NULL);
@@ -135,25 +153,36 @@ bool InspectableWebContentsViewViews::IsDevToolsViewShowing() {
   return devtools_visible_;
 }
 
+bool InspectableWebContentsViewViews::IsDevToolsViewFocused() {
+  if (devtools_window_web_view_)
+    return devtools_window_web_view_->HasFocus();
+  else if (devtools_web_view_)
+    return devtools_web_view_->HasFocus();
+  else
+    return false;
+}
+
 void InspectableWebContentsViewViews::SetIsDocked(bool docked) {
   CloseDevTools();
 
   if (!docked) {
     devtools_window_.reset(new views::Widget);
     devtools_window_web_view_ = new views::WebView(NULL);
+    devtools_window_delegate_ = new DevToolsWindowDelegate(
+        this,
+        devtools_window_web_view_,
+        devtools_window_.get());
 
     views::Widget::InitParams params;
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-    params.delegate = new DevToolsWindowDelegate(this,
-                                                 devtools_window_web_view_,
-                                                 devtools_window_.get());
+    params.delegate = devtools_window_delegate_;
     params.bounds = inspectable_web_contents()->GetDevToolsBounds();
 
 #if defined(USE_X11)
     params.wm_role_name = "devtools";
-    InspectableWebContentsDelegate* delegate = inspectable_web_contents()->GetDelegate();
-    if (delegate)
-      delegate->GetDevToolsWindowWMClass(&params.wm_class_name, &params.wm_class_class);
+    if (GetDelegate())
+      GetDelegate()->GetDevToolsWindowWMClass(&params.wm_class_name,
+                                              &params.wm_class_class);
 #endif
 
     devtools_window_->Init(params);
@@ -167,6 +196,13 @@ void InspectableWebContentsViewViews::SetContentsResizingStrategy(
     const DevToolsContentsResizingStrategy& strategy) {
   strategy_.CopyFrom(strategy);
   Layout();
+}
+
+void InspectableWebContentsViewViews::SetTitle(const base::string16& title) {
+  if (devtools_window_) {
+    title_ = title;
+    devtools_window_->UpdateWindowTitle();
+  }
 }
 
 void InspectableWebContentsViewViews::Layout() {

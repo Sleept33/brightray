@@ -5,8 +5,9 @@
 #ifndef BRIGHTRAY_COMMON_MAIN_DELEGATE_H_
 #define BRIGHTRAY_COMMON_MAIN_DELEGATE_H_
 
-#include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
+#include "base/macros.h"
 #include "content/public/app/content_main_delegate.h"
 
 namespace base {
@@ -22,6 +23,9 @@ namespace brightray {
 class BrowserClient;
 class ContentClient;
 
+void InitializeResourceBundle(const std::string& locale);
+void LoadCommonResources();
+
 class MainDelegate : public content::ContentMainDelegate {
  public:
   MainDelegate();
@@ -30,35 +34,27 @@ class MainDelegate : public content::ContentMainDelegate {
  protected:
   // Subclasses can override this to provide their own ContentClient
   // implementation.
-  virtual scoped_ptr<ContentClient> CreateContentClient();
+  virtual std::unique_ptr<ContentClient> CreateContentClient();
 
   // Subclasses can override this to provide their own BrowserClient
   // implementation.
-  virtual scoped_ptr<BrowserClient> CreateBrowserClient();
-
-  // Subclasses can override this to provide additional .pak files to be
-  // included in the ui::ResourceBundle.
-  virtual void AddDataPackFromPath(
-      ui::ResourceBundle* bundle, const base::FilePath& pak_dir) {}
+  virtual std::unique_ptr<BrowserClient> CreateBrowserClient();
 
 #if defined(OS_MACOSX)
   // Subclasses can override this to custom the paths of child process and
   // framework bundle.
-  virtual base::FilePath GetResourcesPakFilePath();
   virtual void OverrideChildProcessPath();
   virtual void OverrideFrameworkBundlePath();
 #endif
 
-  virtual bool BasicStartupComplete(int* exit_code) override;
-  virtual void PreSandboxStartup() override;
+  bool BasicStartupComplete(int* exit_code) override;
+  void PreSandboxStartup() override;
 
  private:
-  virtual content::ContentBrowserClient* CreateContentBrowserClient() override;
+  content::ContentBrowserClient* CreateContentBrowserClient() override;
 
-  void InitializeResourceBundle();
-
-  scoped_ptr<ContentClient> content_client_;
-  scoped_ptr<BrowserClient> browser_client_;
+  std::unique_ptr<ContentClient> content_client_;
+  std::unique_ptr<BrowserClient> browser_client_;
 
   DISALLOW_COPY_AND_ASSIGN(MainDelegate);
 };

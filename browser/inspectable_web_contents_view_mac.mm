@@ -2,7 +2,9 @@
 
 #import <AppKit/AppKit.h>
 
+#include "base/strings/sys_string_conversions.h"
 #include "browser/inspectable_web_contents.h"
+#include "browser/inspectable_web_contents_view_delegate.h"
 #import "browser/mac/bry_inspectable_web_contents_view.h"
 
 namespace brightray {
@@ -17,6 +19,7 @@ InspectableWebContentsViewMac::InspectableWebContentsViewMac(InspectableWebConte
 }
 
 InspectableWebContentsViewMac::~InspectableWebContentsViewMac() {
+  [view_ removeObservers];
   CloseDevTools();
 }
 
@@ -36,6 +39,10 @@ bool InspectableWebContentsViewMac::IsDevToolsViewShowing() {
   return [view_ isDevToolsVisible];
 }
 
+bool InspectableWebContentsViewMac::IsDevToolsViewFocused() {
+  return [view_ isDevToolsFocused];
+}
+
 void InspectableWebContentsViewMac::SetIsDocked(bool docked) {
   [view_ setIsDocked:docked];
 }
@@ -45,4 +52,8 @@ void InspectableWebContentsViewMac::SetContentsResizingStrategy(
   [view_ setContentsResizingStrategy:strategy];
 }
 
+void InspectableWebContentsViewMac::SetTitle(const base::string16& title) {
+  [view_ setTitle:base::SysUTF16ToNSString(title)];
 }
+
+}  // namespace brightray

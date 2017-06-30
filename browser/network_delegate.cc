@@ -4,11 +4,32 @@
 
 #include "browser/network_delegate.h"
 
+#include <string>
+#include <vector>
+
+#include "base/command_line.h"
+#include "base/strings/string_split.h"
+#include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/url_request/url_request.h"
 
 namespace brightray {
 
+namespace {
+
+// Ignore the limit of 6 connections per host.
+const char kIgnoreConnectionsLimit[] = "ignore-connections-limit";
+
+}  // namespace
+
 NetworkDelegate::NetworkDelegate() {
+  auto command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(kIgnoreConnectionsLimit)) {
+    std::string value =
+        command_line->GetSwitchValueASCII(kIgnoreConnectionsLimit);
+    ignore_connections_limit_domains_ = base::SplitString(
+        value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  }
 }
 
 NetworkDelegate::~NetworkDelegate() {
@@ -18,33 +39,35 @@ int NetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
+  for (const auto& domain : ignore_connections_limit_domains_) {
+    if (request->url().DomainIs(domain)) {
+      // Allow unlimited concurrent connections.
+      request->SetPriority(net::MAXIMUM_PRIORITY);
+      request->SetLoadFlags(request->load_flags() | net::LOAD_IGNORE_LIMITS);
+      break;
+    }
+  }
+
   return net::OK;
 }
 
-void NetworkDelegate::OnResolveProxy(const GURL& url,
-                                     int load_flags,
-                                     const net::ProxyService& proxy_service,
-                                     net::ProxyInfo* result) {
-}
-
-void NetworkDelegate::OnProxyFallback(const net::ProxyServer& bad_proxy, int net_error) {
-}
-
-int NetworkDelegate::OnBeforeSendHeaders(
+int NetworkDelegate::OnBeforeStartTransaction(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
   return net::OK;
 }
 
-void NetworkDelegate::OnBeforeSendProxyHeaders(net::URLRequest* request,
-                                               const net::ProxyInfo& proxy_info,
-                                               net::HttpRequestHeaders* headers) {
-}
-
-void NetworkDelegate::OnSendHeaders(
+void NetworkDelegate::OnStartTransaction(
     net::URLRequest* request,
     const net::HttpRequestHeaders& headers) {
+}
+
+void NetworkDelegate::OnBeforeSendHeaders(
+    net::URLRequest* request,
+    const net::ProxyInfo& proxy_info,
+    const net::ProxyRetryInfoMap& proxy_retry_info,
+    net::HttpRequestHeaders* headers) {
 }
 
 int NetworkDelegate::OnHeadersReceived(
@@ -63,8 +86,12 @@ void NetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
 void NetworkDelegate::OnResponseStarted(net::URLRequest* request) {
 }
 
-void NetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
-                                          int bytes_read) {
+void NetworkDelegate::OnNetworkBytesReceived(net::URLRequest* request,
+                                             int64_t bytes_read) {
+}
+
+void NetworkDelegate::OnNetworkBytesSent(net::URLRequest* request,
+                                         int64_t bytes_sent) {
 }
 
 void NetworkDelegate::OnCompleted(net::URLRequest* request, bool started) {
@@ -101,18 +128,13 @@ bool NetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
   return true;
 }
 
-bool NetworkDelegate::OnCanThrottleRequest(
-    const net::URLRequest& request) const {
-  return false;
-}
-
 bool NetworkDelegate::OnCanEnablePrivacyMode(
     const GURL& url,
     const GURL& first_party_for_cookies) const {
   return false;
 }
 
-bool NetworkDelegate::OnFirstPartyOnlyCookieExperimentEnabled() const {
+bool NetworkDelegate::OnAreExperimentalCookieFeaturesEnabled() const {
   return true;
 }
 

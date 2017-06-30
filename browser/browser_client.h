@@ -5,12 +5,16 @@
 #ifndef BRIGHTRAY_BROWSER_BROWSER_CLIENT_H_
 #define BRIGHTRAY_BROWSER_BROWSER_CLIENT_H_
 
+#include "browser/net_log.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 
 namespace brightray {
 
 class BrowserContext;
 class BrowserMainParts;
+class NotificationPresenter;
+class PlatformNotificationService;
 
 class BrowserClient : public content::ContentBrowserClient {
  public:
@@ -19,8 +23,29 @@ class BrowserClient : public content::ContentBrowserClient {
   BrowserClient();
   ~BrowserClient();
 
-  BrowserContext* browser_context();
   BrowserMainParts* browser_main_parts() { return browser_main_parts_; }
+
+  NotificationPresenter* GetNotificationPresenter();
+
+  // Subclasses should override this to enable or disable WebNotification.
+  virtual void WebNotificationAllowed(
+      int render_process_id,
+      const base::Callback<void(bool, bool)>& callback) {
+    callback.Run(false, true);
+  }
+
+  // Subclasses that override this (e.g., to provide their own protocol
+  // handlers) should call this implementation after doing their own work.
+  content::BrowserMainParts* CreateBrowserMainParts(
+      const content::MainFunctionParams&) override;
+  content::MediaObserver* GetMediaObserver() override;
+  content::PlatformNotificationService* GetPlatformNotificationService()
+      override;
+  void GetAdditionalAllowedSchemesForFileSystem(
+      std::vector<std::string>* additional_schemes) override;
+  net::NetLog* GetNetLog() override;
+  base::FilePath GetDefaultDownloadDirectory() override;
+  content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
 
  protected:
   // Subclasses should override this to provide their own BrowserMainParts
@@ -29,36 +54,12 @@ class BrowserClient : public content::ContentBrowserClient {
   virtual BrowserMainParts* OverrideCreateBrowserMainParts(
       const content::MainFunctionParams&);
 
-  // Subclasses that override this (e.g., to provide their own protocol
-  // handlers) should call this implementation after doing their own work.
-  net::URLRequestContextGetter* CreateRequestContext(
-      content::BrowserContext* browser_context,
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector protocol_interceptors) override;
-
  private:
-  content::BrowserMainParts* CreateBrowserMainParts(
-      const content::MainFunctionParams&) override;
-  content::MediaObserver* GetMediaObserver() override;
-  content::PlatformNotificationService* GetPlatformNotificationService() override;
-  void GetAdditionalAllowedSchemesForFileSystem(
-      std::vector<std::string>* additional_schemes) override;
-  base::FilePath GetDefaultDownloadDirectory() override;
-  content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  void GetAdditionalMappedFilesForChildProcess(
-      const base::CommandLine& command_line,
-      int child_process_id,
-      content::FileDescriptorInfo* mappings) override;
-#endif
-
   BrowserMainParts* browser_main_parts_;
+  NetLog net_log_;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  base::ScopedFD v8_natives_fd_;
-  base::ScopedFD v8_snapshot_fd_;
-#endif  // OS_POSIX && !OS_MACOSX
+  std::unique_ptr<PlatformNotificationService> notification_service_;
+  std::unique_ptr<NotificationPresenter> notification_presenter_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserClient);
 };

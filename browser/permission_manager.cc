@@ -5,7 +5,10 @@
 #include "browser/permission_manager.h"
 
 #include "base/callback.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/permission_type.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 
 namespace brightray {
 
@@ -15,21 +18,43 @@ PermissionManager::PermissionManager() {
 PermissionManager::~PermissionManager() {
 }
 
-void PermissionManager::RequestPermission(
+int PermissionManager::RequestPermission(
     content::PermissionType permission,
-    content::WebContents* web_contents,
-    int request_id,
+    content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     bool user_gesture,
-    const base::Callback<void(content::PermissionStatus)>& callback) {
-  callback.Run(content::PERMISSION_STATUS_GRANTED);
+    const base::Callback<void(blink::mojom::PermissionStatus)>& callback) {
+  if (permission == content::PermissionType::MIDI_SYSEX) {
+    content::ChildProcessSecurityPolicy::GetInstance()->
+        GrantSendMidiSysExMessage(render_frame_host->GetProcess()->GetID());
+  }
+  callback.Run(blink::mojom::PermissionStatus::GRANTED);
+  return kNoPendingOperation;
 }
 
-void PermissionManager::CancelPermissionRequest(
-    content::PermissionType permission,
-    content::WebContents* web_contents,
-    int request_id,
-    const GURL& requesting_origin) {
+int PermissionManager::RequestPermissions(
+    const std::vector<content::PermissionType>& permissions,
+    content::RenderFrameHost* render_frame_host,
+    const GURL& requesting_origin,
+    bool user_gesture,
+    const base::Callback<void(
+        const std::vector<blink::mojom::PermissionStatus>&)>& callback) {
+  std::vector<blink::mojom::PermissionStatus> permissionStatuses;
+
+  for (auto permission : permissions) {
+    if (permission == content::PermissionType::MIDI_SYSEX) {
+      content::ChildProcessSecurityPolicy::GetInstance()->
+          GrantSendMidiSysExMessage(render_frame_host->GetProcess()->GetID());
+    }
+
+    permissionStatuses.push_back(blink::mojom::PermissionStatus::GRANTED);
+  }
+
+  callback.Run(permissionStatuses);
+  return kNoPendingOperation;
+}
+
+void PermissionManager::CancelPermissionRequest(int request_id) {
 }
 
 void PermissionManager::ResetPermission(
@@ -38,24 +63,18 @@ void PermissionManager::ResetPermission(
     const GURL& embedding_origin) {
 }
 
-content::PermissionStatus PermissionManager::GetPermissionStatus(
+blink::mojom::PermissionStatus PermissionManager::GetPermissionStatus(
     content::PermissionType permission,
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
-  return content::PERMISSION_STATUS_GRANTED;
-}
-
-void PermissionManager::RegisterPermissionUsage(
-    content::PermissionType permission,
-    const GURL& requesting_origin,
-    const GURL& embedding_origin) {
+  return blink::mojom::PermissionStatus::GRANTED;
 }
 
 int PermissionManager::SubscribePermissionStatusChange(
     content::PermissionType permission,
     const GURL& requesting_origin,
     const GURL& embedding_origin,
-    const base::Callback<void(content::PermissionStatus)>& callback) {
+    const base::Callback<void(blink::mojom::PermissionStatus)>& callback) {
   return -1;
 }
 

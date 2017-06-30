@@ -3,19 +3,16 @@
     'vendor/download/libchromiumcontent/filenames.gypi',
   ],
   'variables': {
-    # Build with clang on Linux and Mac.
-    'clang%': 1,
-
-    'libchromiumcontent_src_dir': '<(libchromiumcontent_root_dir)/src',
     'libchromiumcontent_component%': 1,
+    'pkg-config%': 'pkg-config',
     'conditions': [
       # The "libchromiumcontent_component" is defined when calling "gyp".
       ['libchromiumcontent_component', {
-        'libchromiumcontent_dir%': '<(libchromiumcontent_root_dir)/shared_library',
+        'libchromiumcontent_dir%': '<(libchromiumcontent_shared_libraries_dir)',
         'libchromiumcontent_libraries%': '<(libchromiumcontent_shared_libraries)',
         'libchromiumcontent_v8_libraries%': '<(libchromiumcontent_shared_v8_libraries)',
       }, {
-        'libchromiumcontent_dir%': '<(libchromiumcontent_root_dir)/static_library',
+        'libchromiumcontent_dir%': '<(libchromiumcontent_static_libraries_dir)',
         'libchromiumcontent_libraries%': '<(libchromiumcontent_static_libraries)',
         'libchromiumcontent_v8_libraries%': '<(libchromiumcontent_static_v8_libraries)',
       }],
@@ -34,16 +31,10 @@
       'GCC_ENABLE_CPP_EXCEPTIONS': 'NO',
       'GCC_ENABLE_CPP_RTTI': 'NO',
       'GCC_TREAT_WARNINGS_AS_ERRORS': 'YES',
-      'MACOSX_DEPLOYMENT_TARGET': '10.8',
+      'CLANG_CXX_LANGUAGE_STANDARD': 'c++11',
+      'MACOSX_DEPLOYMENT_TARGET': '10.9',
       'RUN_CLANG_STATIC_ANALYZER': 'YES',
-      'SDKROOT': 'macosx',
       'USE_HEADER_MAP': 'NO',
-      'WARNING_CFLAGS': [
-        '-Wall',
-        '-Wextra',
-        '-Wno-unused-parameter',
-        '-Wno-missing-field-initializers',
-      ],
     },
     'msvs_configuration_attributes': {
       'OutputDirectory': '<(DEPTH)\\build\\$(ConfigurationName)',
@@ -55,7 +46,6 @@
     ],
     'msvs_settings': {
       'VCCLCompilerTool': {
-        'RuntimeLibrary': '2',  # /MD (nondebug DLL)
         'AdditionalOptions': ['/MP'],
         'MinimalRebuild': 'false',
         'BufferSecurityCheck': 'true',
@@ -74,6 +64,7 @@
         'GenerateDebugInformation': 'true',
         'MapFileName': '$(OutDir)\\$(TargetName).map',
         'ImportLibrary': '$(OutDir)\\lib\\$(TargetName).lib',
+        'LargeAddressAware': '2',
         'AdditionalOptions': [
           # ATL 8.0 included in WDK 7.1 makes the linker to generate
           # following
@@ -93,24 +84,6 @@
         ],
       },
     },
-    'msvs_disabled_warnings': [
-      4100, # unreferenced formal parameter
-      4121, # alignment of a member was sensitive to packing
-      4127, # conditional expression is constant
-      4189, # local variable is initialized but not referenced
-      4244, # 'initializing' : conversion from 'double' to 'size_t', possible loss of data
-      4245, # 'initializing' : conversion from 'int' to 'const net::QuicVersionTag', signed/unsigned mismatch
-      4251, # class 'std::xx' needs to have dll-interface.
-      4310, # cast truncates constant value
-      4355, # 'this' : used in base member initializer list
-      4480, # nonstandard extension used: specifying underlying type for enum
-      4481, # nonstandard extension used: override specifier 'override'
-      4510, # default constructor could not be generated
-      4512, # assignment operator could not be generated
-      4610, # user defined constructor required
-      4702, # unreachable code
-      4819, # The file contains a character that cannot be represented in the current code page
-    ],
     'configurations': {
       # The "Debug" and "Release" configurations are not actually used.
       'Debug': {},
@@ -131,6 +104,8 @@
           'SK_SUPPORT_LEGACY_SETCONFIG',
           'SK_IGNORE_ETC1_SUPPORT',
           'SK_IGNORE_GPU_DITHER',
+          # NACL is not enabled:
+          'DISABLE_NACL',
         ],
         'conditions': [
           ['OS!="mac"', {
@@ -139,9 +114,16 @@
               'USE_AURA',
             ],
           }],
-          ['OS not in ["mac", "win"]', {
+          ['OS in ["mac", "win"]', {
+            'defines': [
+              'USE_OPENSSL',
+            ],
+          }, {
             'defines': [
               'USE_X11',
+              # "use_nss_certs" is set to 1 in libchromiumcontent.
+              'USE_NSS_CERTS',
+              'USE_NSS',  # deprecated after Chrome 45.
             ],
           }],
           ['OS=="linux"', {
@@ -152,10 +134,16 @@
             ],
             'cflags_cc': [
               '-D__STRICT_ANSI__',
-              '-std=gnu++11',
               '-fno-rtti',
             ],
           }],  # OS=="linux"
+          ['OS=="mac"', {
+            'defines': [
+              # The usage of "webrtc/modules/desktop_capture/desktop_capture_options.h"
+              # is required to see this macro.
+              'WEBRTC_MAC',
+             ],
+          }],  # OS=="mac"
           ['OS=="win"', {
             'include_dirs': [
               '<(libchromiumcontent_src_dir)/third_party/wtl/include',
@@ -172,6 +160,9 @@
               'WIN32_LEAN_AND_MEAN',
               '_ATL_NO_OPENGL',
               '_SECURE_ATL',
+              # The usage of "webrtc/modules/desktop_capture/desktop_capture_options.h"
+              # is required to see this macro.
+              'WEBRTC_WIN',
             ],
             'conditions': [
               ['target_arch=="x64"', {
@@ -207,6 +198,7 @@
         ],
         'msvs_settings': {
           'VCCLCompilerTool': {
+            'RuntimeLibrary': '2',  # /MD (nondebug DLL)
             'Optimization': '0',  # 0 = /Od
             # See http://msdn.microsoft.com/en-us/library/8wtf2dfz(VS.71).aspx
             'BasicRuntimeChecks': '3',  # 3 = all checks enabled, 0 = off
@@ -217,6 +209,7 @@
         'abstract': 1,
         'msvs_settings': {
           'VCCLCompilerTool': {
+            'RuntimeLibrary': '0',  # /MT (nondebug static)
             # 1, optimizeMinSpace, Minimize Size (/O1)
             'Optimization': '1',
             # 2, favorSize - Favor small code (/Os)
@@ -321,42 +314,48 @@
         ],
       }],
     ],  # target_conditions
-  },  # target_defaults
-  'conditions': [
-    ['clang', {
-      'make_global_settings': [
-        ['CC', '/usr/bin/clang'],
-        ['CXX', '/usr/bin/clang++'],
-        ['LINK', '$(CXX)'],
-        ['CC.host', '$(CC)'],
-        ['CXX.host', '$(CXX)'],
-        ['LINK.host', '$(LINK)'],
-      ],
-      'target_defaults': {
-        'cflags_cc': [
-          '-std=c++11',
-        ],
+    # Ignored compiler warnings of Chromium.
+    'conditions': [
+      ['OS=="mac"', {
         'xcode_settings': {
-          'CC': '/usr/bin/clang',
-          'LDPLUSPLUS': '/usr/bin/clang++',
-          'OTHER_CFLAGS': [
-            '-fcolor-diagnostics',
+          'WARNING_CFLAGS': [
+            '-Wall',
+            '-Wextra',
+            '-Wno-unused-parameter',
+            '-Wno-missing-field-initializers',
+            '-Wno-deprecated-declarations',
+            '-Wno-undefined-var-template', # https://crbug.com/604888
+            '-Wno-unneeded-internal-declaration',
+            '-Wno-inconsistent-missing-override',
           ],
-
-          'GCC_C_LANGUAGE_STANDARD': 'c99',  # -std=c99
-          'CLANG_CXX_LIBRARY': 'libc++',  # -stdlib=libc++
-          'CLANG_CXX_LANGUAGE_STANDARD': 'c++11',  # -std=c++11
         },
-        'target_conditions': [
-          ['_type in ["executable", "shared_library"]', {
-            'xcode_settings': {
-              # On some machines setting CLANG_CXX_LIBRARY doesn't work for
-              # linker.
-              'OTHER_LDFLAGS': [ '-stdlib=libc++' ],
-            },
-          }],
+      }],
+      ['OS=="linux"', {
+        'cflags': [
+          '-Wno-inconsistent-missing-override',
+          '-Wno-undefined-var-template', # https://crbug.com/604888
         ],
-      },
-    }],  # clang
-  ],
+      }],
+      ['OS=="win"', {
+        'msvs_disabled_warnings': [
+          4100, # unreferenced formal parameter
+          4121, # alignment of a member was sensitive to packing
+          4127, # conditional expression is constant
+          4189, # local variable is initialized but not referenced
+          4244, # 'initializing' : conversion from 'double' to 'size_t', possible loss of data
+          4245, # 'initializing' : conversion from 'int' to 'const net::QuicVersionTag', signed/unsigned mismatch
+          4251, # class 'std::xx' needs to have dll-interface.
+          4310, # cast truncates constant value
+          4355, # 'this' : used in base member initializer list
+          4480, # nonstandard extension used: specifying underlying type for enum
+          4481, # nonstandard extension used: override specifier 'override'
+          4510, # default constructor could not be generated
+          4512, # assignment operator could not be generated
+          4610, # user defined constructor required
+          4702, # unreachable code
+          4819, # The file contains a character that cannot be represented in the current code page
+        ],
+      }],
+    ],  # conditions
+  },  # target_defaults
 }
